@@ -1,5 +1,21 @@
-#include <DHT.h>
-#include <DHT_U.h>
+#include <DHTesp.h>
+
+#include <ArduinoJson.h>
+
+#include <HTTP_Method.h>
+#include <WebServer.h>
+
+#include <ETH.h>
+#include <WiFi.h>
+#include <WiFiAP.h>
+#include <WiFiClient.h>
+#include <WiFiGeneric.h>
+#include <WiFiMulti.h>
+#include <WiFiScan.h>
+#include <WiFiServer.h>
+#include <WiFiSTA.h>
+#include <WiFiType.h>
+#include <WiFiUdp.h>
 
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
@@ -18,20 +34,22 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(&Wire, 0x40);
 #define SERVOMIN  150 // this is the 'minimum' pulse length count (out of 4096)
 #define SERVOMAX  600 // this is the 'maximum' pulse length count (out of 4096)
 #define DHTPIN 13
-#define DHTTYPE DHT22
+#define DHTTYPE DHTesp::DHT22
 
-DHT dht(DHTPIN, DHTTYPE);
+//////// WIFI ////////
+
+DHTesp dht; //(DHTPIN, DHTTYPE);
 
 ///////// TEMP VARS /////////
 // Fahrenheit obviously
-float desired_temp = 68;
-float allowable_deviation = 2;
+float desired_temp = 70;
+float allowable_deviation = 0.25;
 float average_observed_temp = 0;
 
 //////// SERVO VARS /////////
 // TODO set this via grpc
 // Sweep range
-int off_degrees = 5;
+int off_degrees = 15;
 int on_degrees = 80;
 // our servo # counter
 uint8_t servonum = 0;
@@ -59,25 +77,25 @@ void hold_temperature (void * parameter) {
       Serial.println("Turning heat on");
       turn_heat_on_or_off(true);
     }   
-    Serial.print(F("Audio Stack HighWater @ "));
+    Serial.print(F("HOLD_TEMPERATURE HighWater @ "));
     Serial.println(uxTaskGetStackHighWaterMark(NULL));
     // Yield a lot. This doesn't need to be extremely precise
     delay(5000);
   }
 }
 
-//void sample_temperature (void * parameter) {
-//  average_observed_temperature = get_temperature();
-//  for (;;) {
-//
-//    
-//  }  
-//}
+void connect_to_wifi () {
+  
+}
+
+void setup_web_server () {
+
+}
 
 void setup() {
   Serial.begin(9600);
   delay(100);
-  dht.begin();
+  dht.setup(DHTPIN, DHTTYPE);
   Serial.print("Booting Thermostat Sensor Manipulator ... ");
 
   pwm.begin();
@@ -122,13 +140,17 @@ void setServoPulse(uint8_t n, double pulse) {
 // Consider dispatching this as a task 
 void seek_to_degrees (int deg) {
   // Fudge a slow torque ramp up like this
-  Serial.println("Seeking to " + String(deg));
+  
   int diff = 1;
   int total_movt = deg - current_degrees;
   int delay_step = 110;
   // Quit if no-op
-  if (total_movt == 0) return;
-  
+  if (total_movt == 0) {
+    set_degrees(deg);
+    delay(10);
+    setServoPulse(0, 0); // Turn servo off
+  }
+  Serial.println("Seeking to " + String(deg));
   if (total_movt < 0) {
     diff = -1;
   }
@@ -153,13 +175,7 @@ void set_degrees (int deg) {
 
 float get_temperature () {
 //  float temp = 0;
-  return dht.readTemperature(true);
-//  do {
-//    temp = 
-//    Serial.print("Got temp: "); Serial.println(String(temp, 2));
-//    delay(100);
-//  } while (isnan(temp));
-//  return temp;
+  return DHTesp::toFahrenheit(dht.getTemperature());
 }
 
 void turn_heat_on_or_off (bool on) {
@@ -172,8 +188,3 @@ void loop() {
   seek_to_degrees(desired_degrees);
   delay(1000);
 }
-
-
-
-
-
