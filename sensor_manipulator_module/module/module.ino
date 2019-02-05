@@ -38,7 +38,10 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(&Wire, 0x40);
 
 //////// WIFI ////////
 
-DHTesp dht; //(DHTPIN, DHTTYPE);
+//////// WEB SERVER ////////
+WebServer server(80);
+
+DHTesp dht; 
 
 ///////// TEMP VARS /////////
 // Fahrenheit obviously
@@ -58,6 +61,7 @@ uint8_t current_degrees = 0;
 int desired_degrees = off_degrees;
 
 TaskHandle_t TemperatureHoldTask;
+TaskHandle_t HandleClientRequestTask;
 
 void hold_temperature (void * parameter) {
   float difference;
@@ -85,11 +89,65 @@ void hold_temperature (void * parameter) {
 }
 
 void connect_to_wifi () {
+  Serial.print("Connecting to " + String(WIFI_SSID));
+  WiFi.begin(WIFI_SSID, WIFI_PSK);
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(250);
+  }
+  Serial.println();
+  Serial.print("Connected - ");
+  Serial.print(WiFi.localIP());
+  Serial.print(" - ");
+  Serial.print(WiFi.macAddress());
+  Serial.println();
+}
+
+void get_response_json(char* output_str) {
   
 }
 
-void setup_web_server () {
+// This'll be the entrypoint for the RPC shit
+void handle_request() {
+  Serial.print(F("HANDLE_CLIENT_REQUEST HighWater @ "));
+  Serial.println(uxTaskGetStackHighWaterMark(NULL));
 
+  
+//  get_response_json(response_json);
+  String output_str;
+  StaticJsonBuffer<1000> json_buffer;
+  JsonObject& root = json_buffer.createObject();
+  root["currentTemp"] = average_observed_temp;
+  root["on"] = current_degrees == on_degrees;
+  root.printTo(output_str);
+  
+  server.send(200, "application/json", output_str); 
+//  if (!server.hasArg("plain")) {
+//    server.send(200, "text/plain", "Fuckin A man");
+//    return;
+//  }
+//
+//  server.send(200, "text/plain", server.arg("plain"));
+} 
+
+void server_task(void * parameter) {
+  for(;;) {
+    server.handleClient();        
+  }
+}
+
+void setup_web_server() {
+  server.on("/", handle_request);
+  server.begin();
+  xTaskCreatePinnedToCore(
+      server_task, /* Function to implement the task */
+      "HandleClientRequestTask", /* Name of the task */
+      10000,  /* Stack size in words -- profiled at 1620*/
+      NULL,  /* Task input parameter */
+      0,  /* Priority of the task */
+      &HandleClientRequestTask,  /* Task handle. */
+      1
+    ); /* Core where the task should run */
 }
 
 void setup() {
@@ -107,6 +165,9 @@ void setup() {
   set_degrees(off_degrees);
   // Wait for servo to get to the off position
   delay(1000);
+
+  connect_to_wifi();
+  setup_web_server();
 
   Serial.println(" done");
   xTaskCreatePinnedToCore(
