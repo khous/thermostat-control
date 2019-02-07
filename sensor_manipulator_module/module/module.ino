@@ -89,6 +89,7 @@ void hold_temperature (void * parameter) {
 }
 
 void connect_to_wifi () {
+  Serial.println();
   Serial.print("Connecting to " + String(WIFI_SSID));
   WiFi.begin(WIFI_SSID, WIFI_PSK);
   while (WiFi.status() != WL_CONNECTED) {
@@ -109,25 +110,47 @@ void get_response_json(char* output_str) {
 
 // This'll be the entrypoint for the RPC shit
 void handle_request() {
+  StaticJsonBuffer<1000> json_buffer;
+  
+  if (server.method() == HTTP_GET) {
+    String output_str;
+    
+    JsonObject& root = json_buffer.createObject();
+    root["currentTemp"] = average_observed_temp;
+    root["setTemp"] = desired_temp;
+    root["on"] = current_degrees == on_degrees;
+    root["co2"] = "A lot";
+    root["on_degrees"] = on_degrees;
+    root["off_degrees"] = off_degrees;
+    
+    root.printTo(output_str);
+    
+    server.send(200, "application/json", output_str);
+  } if (server.method() == HTTP_POST) {
+    if (!server.hasArg("plain")) {
+      server.send(400, "application/json", "{ \"status\": \"invalid\"}");
+      return;
+    }
+
+    JsonObject& root = json_buffer.parseObject(server.arg("plain"));
+    String command = root["command"];
+
+    // Handle RPC
+    if (String("set_temp").equals(command)) {
+      desired_temp = root["temp"];      
+    } else if (String("set_sweep").equals(command)) {
+      on_degrees = root["on_degrees"];
+      off_degrees = root["off_degrees"];      
+    } else {
+      server.send(400, "application/json", "{ \"status\": \"invalid\"}");
+    }
+
+    server.send(200);
+  }
+
   Serial.print(F("HANDLE_CLIENT_REQUEST HighWater @ "));
   Serial.println(uxTaskGetStackHighWaterMark(NULL));
 
-  
-//  get_response_json(response_json);
-  String output_str;
-  StaticJsonBuffer<1000> json_buffer;
-  JsonObject& root = json_buffer.createObject();
-  root["currentTemp"] = average_observed_temp;
-  root["on"] = current_degrees == on_degrees;
-  root.printTo(output_str);
-  
-  server.send(200, "application/json", output_str); 
-//  if (!server.hasArg("plain")) {
-//    server.send(200, "text/plain", "Fuckin A man");
-//    return;
-//  }
-//
-//  server.send(200, "text/plain", server.arg("plain"));
 } 
 
 void server_task(void * parameter) {
@@ -154,7 +177,7 @@ void setup() {
   Serial.begin(9600);
   delay(100);
   dht.setup(DHTPIN, DHTTYPE);
-  Serial.print("Booting Thermostat Sensor Manipulator ... ");
+  Serial.println("Booting Thermostat Sensor Manipulator ... ");
 
   pwm.begin();
   
@@ -169,7 +192,7 @@ void setup() {
   connect_to_wifi();
   setup_web_server();
 
-  Serial.println(" done");
+  Serial.println("Done ...");
   xTaskCreatePinnedToCore(
       hold_temperature, /* Function to implement the task */
       "TemperatureHoldTask", /* Name of the task */
