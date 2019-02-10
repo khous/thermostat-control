@@ -43,8 +43,7 @@ int current_eco2_ppm = 0;
 Adafruit_CCS811 ccs;
 
 //////// WIFI ////////
-const char* WIFI_SSID = "aurelius";
-const char* WIFI_PSK = "18082168187";
+
 
 //////// WEB SERVER ////////
 WebServer server(80);
