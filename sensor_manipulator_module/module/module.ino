@@ -1,3 +1,5 @@
+#include <Adafruit_CCS811.h>
+
 #include <DHTesp.h>
 
 #include <ArduinoJson.h>
@@ -36,7 +38,13 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(&Wire, 0x40);
 #define DHTPIN 13
 #define DHTTYPE DHTesp::DHT22
 
+//////// CO2 /////////
+int current_eco2_ppm = 0;
+Adafruit_CCS811 ccs;
+
 //////// WIFI ////////
+const char* WIFI_SSID = "aurelius";
+const char* WIFI_PSK = "18082168187";
 
 //////// WEB SERVER ////////
 WebServer server(80);
@@ -119,7 +127,7 @@ void handle_request() {
     root["currentTemp"] = average_observed_temp;
     root["setTemp"] = desired_temp;
     root["on"] = current_degrees == on_degrees;
-    root["co2"] = "A lot";
+    root["co2"] = current_eco2_ppm;
     root["on_degrees"] = on_degrees;
     root["off_degrees"] = off_degrees;
     
@@ -173,21 +181,42 @@ void setup_web_server() {
     ); /* Core where the task should run */
 }
 
+void read_eco2 () {
+  while (!ccs.available()) {
+    Serial.println("Wait for CO2");
+    delay(100);
+  }
+
+  if (!ccs.readData()) {
+    Serial.print("CO2 ppm: ");
+    Serial.println(current_eco2_ppm);
+    current_eco2_ppm = ccs.geteCO2();    
+  } else {
+    Serial.println("Error reading CO2");
+  }
+  
+}
+
 void setup() {
   Serial.begin(9600);
   delay(100);
   dht.setup(DHTPIN, DHTTYPE);
   Serial.println("Booting Thermostat Sensor Manipulator ... ");
 
-  pwm.begin();
-  
+  pwm.begin();  
   pwm.setPWMFreq(HZ);  // Analog servos run at ~60 Hz updates
-
   delay(100);
+  
   // Set absolute
   set_degrees(off_degrees);
   // Wait for servo to get to the off position
   delay(1000);
+
+  if (!ccs.begin()) {
+    Serial.println("CO2 Connection Failure");
+    Serial.println("Halting Boot");
+    while (1);
+  }
 
   connect_to_wifi();
   setup_web_server();
@@ -267,6 +296,8 @@ void turn_heat_on_or_off (bool on) {
 }
 
 void loop() { 
+  Serial.println("Reading CO2");
+  read_eco2();
   average_observed_temp = get_temperature();
   String message = "Temp: " + String(average_observed_temp, 2);
   seek_to_degrees(desired_degrees);
