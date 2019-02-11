@@ -9,5 +9,9 @@ class SensorManipulatorModule(db.Model):
     ipv4_address = db.Column(db.String(15), nullable=False)
     last_keep_alive_ping = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
 
+    config_id = db.Column(db.Integer, db.ForeignKey("module_config.id"), nullable=True, unique=True)
+    module = db.relationship('ModuleConfig',
+                             backref=db.backref('sensor_manipulator_module', lazy=False))
+
     def __repr__(self):
         return 'Module Name:' % self.name

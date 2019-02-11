@@ -76,6 +76,10 @@ def read_module(module_name):
         "results": responses
     })
 
+@app.route("/module/<module_name>/<status>", methods=[""])
+def turn_module_on_or_off(module_name, status):
+    modules = SensorManipulatorModule.query
+
 
 @app.route("/module/<module_id>/config", methods=["POST"])
 def post_config(module_id):
