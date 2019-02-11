@@ -21,8 +21,24 @@ def post_keep_alive():
     else:
         module.last_keep_alive_ping = datetime.utcnow()
 
-
     app.db.session.add(module)
     app.db.session.commit()
 
     return "ok"
+
+@app.route("/module/<mod_id>", methods=["PATCH"])
+def update_module(mod_id):
+    module = SensorManipulatorModule.query.filter_by(id=mod_id).first()
+
+    if module is None:
+        return "not found", 404
+
+    data = request.json
+
+    for k in data.keys():
+        setattr(module, k, data[k])
+
+    app.db.session.add(module)
+    app.db.session.commit()
+
+    return jsonify(module._asdict())
