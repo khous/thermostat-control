@@ -63,7 +63,10 @@ def read_module(module_name):
             pass
 
         mod_dict = util.to_dict(mod)
-        del mod_dict["module_config"]
+        try:
+            del mod_dict["config"]
+        except KeyError:
+            pass
 
         responses.append({
             "module": mod_dict,
@@ -76,26 +79,45 @@ def read_module(module_name):
         "results": responses
     })
 
-@app.route("/module/<module_name>/<status>", methods=[""])
+@app.route("/module/<module_name>/<status>", methods=["POST"])
 def turn_module_on_or_off(module_name, status):
-    modules = SensorManipulatorModule.query
+    if module_name == "*":
+        modules = SensorManipulatorModule.query.all()
+    else:
+        modules = SensorManipulatorModule.query.filter_by(name=module_name).all()
+
+    for m in modules:
+        if status == "on":
+            m.config.temperature = m.config.on_temperature
+        else:
+            m.config.temperature = m.config.off_temperature
+        app.db.session.add(m)
+        app.db.session.commit()
+
+        push_config(m, m.config)
+
+    return jsonify({"status": "ok"})
 
 
 @app.route("/module/<module_id>/config", methods=["POST"])
 def post_config(module_id):
     data = request.get_json()
+    mod = SensorManipulatorModule.query.filter_by(id=module_id).first()
 
-    config = ModuleConfig.query\
-        .join(SensorManipulatorModule)\
-        .filter(SensorManipulatorModule.id == module_id).first()
+    config = mod.config
 
     if config is None:
         config = ModuleConfig()
-        config.module_id = module_id
+        mod.config = config
 
     config.temperature = data.get("temperature", config.temperature)
+    config.on_temperature = data.get("on_temperature", config.on_temperature)
+    config.off_temperature = data.get("off_temperature", config.off_temperature)
+
     config.servo_on_degrees = data.get("servo_on_degrees", config.servo_on_degrees)
     config.servo_off_degrees = data.get("servo_off_degrees", config.servo_off_degrees)
+
+
 
     if config.servo_on_degrees <= config.servo_off_degrees:
         return "invalid request", 400
@@ -103,10 +125,9 @@ def post_config(module_id):
     app.db.session.add(config)
     app.db.session.commit()
 
-    push_config(config.module, config)
+    push_config(mod, config)
 
     config_dict = util.to_dict(config)
-    del config_dict["module"]
 
     return jsonify(config_dict)
 
