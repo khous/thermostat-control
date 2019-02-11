@@ -1,4 +1,5 @@
 from models import db
+
 import datetime
 
 class SensorManipulatorModule(db.Model):
