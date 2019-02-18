@@ -1,4 +1,6 @@
-#include <Adafruit_CCS811.h>
+#include <SparkFunCCS811.h>
+
+#include <HTTPClient.h>
 
 #include <DHTesp.h>
 
@@ -40,21 +42,23 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(&Wire, 0x40);
 
 //////// CO2 /////////
 int current_eco2_ppm = 0;
-Adafruit_CCS811 ccs;
+float ntc_temp = 0;
+CCS811 ccs(0x5A);
 
 //////// WIFI ////////
 
 
 //////// WEB SERVER ////////
 WebServer server(80);
-
-DHTesp dht; 
+HTTPClient http_client; 
 
 ///////// TEMP VARS /////////
+DHTesp dht;
 // Fahrenheit obviously
 float desired_temp = 70;
 float allowable_deviation = 0.25;
 float average_observed_temp = 0;
+float humidity = 0;
 
 //////// SERVO VARS /////////
 // TODO set this via grpc
@@ -77,6 +81,7 @@ void hold_temperature (void * parameter) {
     Serial.print("Current temp: "); Serial.println(String(average_observed_temp, 2));
     Serial.print("Current difference: "); Serial.println(String(difference, 2));
     Serial.print("Desired Temp: "); Serial.println(String(desired_temp, 2));
+    Serial.print("Humidty%: "); Serial.println(String(humidity));
   
     // Current temp is higher than desired temp
     if (difference > 0) {
@@ -111,10 +116,6 @@ void connect_to_wifi () {
   Serial.println();
 }
 
-void get_response_json(char* output_str) {
-  
-}
-
 // This'll be the entrypoint for the RPC shit
 void handle_request() {
   StaticJsonBuffer<1000> json_buffer;
@@ -129,6 +130,8 @@ void handle_request() {
     root["co2"] = current_eco2_ppm;
     root["on_degrees"] = on_degrees;
     root["off_degrees"] = off_degrees;
+    root["hum"] = humidity;
+    root["ntc_temp"] = ntc_temp;
     
     root.printTo(output_str);
     
@@ -148,6 +151,8 @@ void handle_request() {
     } else if (String("set_sweep").equals(command)) {
       on_degrees = root["on_degrees"];
       off_degrees = root["off_degrees"];      
+    } else if (String("set_baseline").equals(command)) {
+      set_baseline();
     } else {
       server.send(400, "application/json", "{ \"status\": \"invalid\"}");
     }
@@ -180,23 +185,41 @@ void setup_web_server() {
     ); /* Core where the task should run */
 }
 
-void read_eco2 () {
-  while (!ccs.available()) {
+void read_eco2 (int humidiy) {
+  ccs.readNTC();
+  ntc_temp = ccs.getTemperature();
+  ccs.setEnvironmentalData(humidity, ntc_temp);
+  while (!ccs.dataAvailable()) {
     Serial.println("Wait for CO2");
     delay(100);
   }
 
-  if (!ccs.readData()) {
-    Serial.print("CO2 ppm: ");
-    Serial.println(current_eco2_ppm);
-    current_eco2_ppm = ccs.geteCO2();    
-  } else {
-    Serial.println("Error reading CO2");
-  }
-  
+  ccs.readAlgorithmResults();  
+  current_eco2_ppm = ccs.getCO2();
+  Serial.print("CO2 ppm: ");
+  Serial.println(current_eco2_ppm); 
+  Serial.print("NTC Temp C: ");
+  Serial.println(ntc_temp); 
 }
 
-void setup() {
+void setup_ccs () {
+   if (ccs.begin() != CCS811Core::SENSOR_SUCCESS) {
+    Serial.println("CO2 Connection Failure");
+    Serial.println("Halting Boot");
+    while (1);
+  }  
+
+  ccs.setDriveMode(1); // read once per second
+}
+
+void set_baseline () {
+  Serial.println("Getting baseline");
+  int baseline = ccs.getBaseline();
+  Serial.print("Baseline: "); Serial.println(baseline);
+  ccs.setBaseline(baseline);  
+}
+
+void setup () {
   Serial.begin(9600);
   delay(100);
   dht.setup(DHTPIN, DHTTYPE);
@@ -211,14 +234,9 @@ void setup() {
   // Wait for servo to get to the off position
   delay(1000);
 
-  if (!ccs.begin()) {
-    Serial.println("CO2 Connection Failure");
-    Serial.println("Halting Boot");
-    while (1);
-  }
-
   connect_to_wifi();
   setup_web_server();
+  setup_ccs();
 
   Serial.println("Done ...");
   xTaskCreatePinnedToCore(
@@ -287,18 +305,52 @@ void set_degrees (int deg) {
 
 float get_temperature () {
 //  float temp = 0;
-  return DHTesp::toFahrenheit(dht.getTemperature());
+  return dht.getTemperature();
+}
+
+int get_humidity() {
+  return dht.getHumidity();  
 }
 
 void turn_heat_on_or_off (bool on) {
   desired_degrees = on ? on_degrees : off_degrees;
 }
 
+void post_keep_alive () {
+  Serial.println("Sending keep-alive");
+  http_client.begin("http://192.168.1.105:1337/keep-alive");
+  http_client.addHeader("Content-Type", "application/json");
+  
+  String body = "{ \"mac\": \"" + WiFi.macAddress() + "\", \"ip\": \"" + WiFi.localIP().toString() + "\" }";  
+  int status_code = http_client.POST(body);
+  
+  if (status_code != 200) {
+    Serial.print("FAIL: Server returned code: ");
+    Serial.println(status_code);
+  } else {
+    Serial.println("Keep-alive posted");
+  }
+  
+  http_client.end();  
+}
+
+int minute_count = 0;
+
 void loop() { 
-  Serial.println("Reading CO2");
-  read_eco2();
-  average_observed_temp = get_temperature();
+  Serial.println("Reading CO2");  
+  float temperature_c = get_temperature();
+  average_observed_temp = DHTesp::toFahrenheit(temperature_c);
+  humidity = get_humidity();
+  read_eco2(humidity);
+  
   String message = "Temp: " + String(average_observed_temp, 2);
   seek_to_degrees(desired_degrees);
+
+  minute_count++;
+  if (minute_count >= 10) {
+    post_keep_alive();
+    minute_count = 0;    
+  }
+  
   delay(1000);
 }
