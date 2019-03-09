@@ -1,8 +1,9 @@
 from . import app
 from flask import request, jsonify
 from datetime import datetime
-from models import util
+from models import util, module_config
 import requests
+from requests import ConnectionError
 import json
 
 from models.sensor_manipulator_module import SensorManipulatorModule
@@ -11,8 +12,15 @@ from models.module_config import ModuleConfig
 @app.route("/keep-alive", methods=["POST"])
 def post_keep_alive():
     data = request.get_json()
+
+    print("recv keepalive")
+    print(str(data))
+
     mac = data["mac"]
     ip = data["ip"]
+
+    baseline_co2 = data.get("baselineco2", 0)
+    baseline_tvoc = data.get("baselinetvoc", 0)
 
     module = SensorManipulatorModule.query.filter_by(mac_address=mac).first()
 
@@ -21,8 +29,25 @@ def post_keep_alive():
         module.ipv4_address = ip
         module.mac_address = mac
         module.name = "Unknown"
+        module.config = module_config.ModuleConfig()
     else:
-        module.last_keep_alive_ping = datetime.utcnow()
+        now = datetime.utcnow()
+
+        if (now - module.last_keep_alive_ping).total_seconds() > 60:
+            # Post baseline back to module
+            requests.post(
+                "http://" + module.ipv4_address + "/",
+                data=json.dumps({
+                    "baselineco2": module.config.baseline_co2,
+                    "baselinetvoc": module.config.baseline_tvoc,
+                })
+            )
+        else:
+            # Save baseline reading
+            module.config.baseline_co2 = baseline_co2
+            module.config.baseline_tvoc = baseline_tvoc
+
+        module.last_keep_alive_ping = now
 
     app.db.session.add(module)
     app.db.session.commit()
@@ -55,8 +80,14 @@ def read_module(module_name):
 
     responses = []
     for mod in modules:
-        res = requests.get("http://" + mod.ipv4_address + "/")
-        reading = ""
+        try:
+            res = requests.get("http://" + mod.ipv4_address + "/")
+            reading = ""
+        except ConnectionError as e:
+            res = requests.Response()
+            res.status_code = 500
+            print(e)
+
         try:
             reading = json.loads(res.text, encoding="utf-8")
         except:
@@ -133,16 +164,22 @@ def post_config(module_id):
 
 
 def push_config(module, config):
-    requests.post("http://" + module.ipv4_address + "/", data=json.dumps({
-        "command": "set_temp",
-        "temp": config.temperature
-    }))
+    try:
+        requests.post("http://" + module.ipv4_address + "/", data=json.dumps({
+            "command": "set_temp",
+            "temp": config.temperature
+        }))
+    except ConnectionError as e:
+        print(e)
 
-    requests.post("http://" + module.ipv4_address + "/", data=json.dumps({
-        "command": "set_sweep",
-        "on_degrees": config.servo_on_degrees,
-        "off_degrees": config.servo_off_degrees
-    }))
+    try:
+        requests.post("http://" + module.ipv4_address + "/", data=json.dumps({
+            "command": "set_sweep",
+            "on_degrees": config.servo_on_degrees,
+            "off_degrees": config.servo_off_degrees
+        }))
+    except ConnectionError as e:
+        print(e)
 
 
 

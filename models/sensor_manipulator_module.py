@@ -1,4 +1,5 @@
 from models import db
+from models.module_config import ModuleConfig
 
 import datetime
 

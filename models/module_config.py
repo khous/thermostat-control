@@ -8,6 +8,8 @@ class ModuleConfig(db.Model):
     off_temperature = db.Column(db.Float, nullable=False, default=50)
     servo_on_degrees = db.Column(db.Integer, nullable=False, default=70)
     servo_off_degrees = db.Column(db.Integer, nullable=False, default=20)
+    baseline_co2 = db.Column(db.Integer, nullable=False, default=0)
+    baseline_tvoc = db.Column(db.Integer, nullable=False, default=0)
 
     def __repr__(self):
         return 'Module Name:' % self.id
