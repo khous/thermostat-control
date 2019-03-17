@@ -1,27 +1,31 @@
-# module logging
+# module log_collection
 # noise reduction
 # sample 10s, average and save
 import time
 import re
-import os
 from datetime import datetime
 from subprocess import check_output
 from huey import crontab
-from huey.contrib.sqlitedb import SqliteHuey
+
 import requests
 
 from flask import Flask
 from models import db
 from models.log import Log
 
-app = Flask(__name__)
-app.config["SQLALCHEMY_DATABASE_URI"] = "postgresql://thermouser:blackie@192.168.1.105/thermo"
-db.init_app(app)
+from log_collection.config import huey
 
-app.db = db
-app.app_context().push()
 
-huey = SqliteHuey("logger", filename="/var/www/thermo-logger/huey.db")
+def get_db():
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = "postgresql://thermouser:blackie@192.168.1.105/thermo"
+    db.init_app(app)
+
+    app.db = db
+    app.app_context().push()
+
+    return db
+
 
 def parse_nmap_output(nmap_output):
     """
@@ -78,46 +82,39 @@ class PiHoleQuery(object):
 def parse_phole_query(q):
     return PiHoleQuery(q[2], q[0])
 
-# @huey.periodic_task(crontab(month="*", day="*", hour="*", minute="*", day_of_week="*"))
+@huey.periodic_task(crontab(month="*", day="*", hour="*", minute="*", day_of_week="*"))
 def get_dns_queries():
+    db = get_db()
+    last_log = Log.query.filter_by(type="dns-query").order_by(Log.ts.desc()).first()
 
-    if not os.path.exists("./last-sync"):
-        with open("./last-sync", mode="w"):
-            pass
+    if not last_log:
+        val = 0
+    else:
+        epoch = datetime.utcfromtimestamp(0)
+        val = (last_log.ts - epoch).total_seconds()
 
-    with open("./last-sync", mode="r+") as f:
-        val = f.readline()
-
-        try:
-            last_sync_seconds = int(val)
-        except (ValueError, TypeError):
-            last_sync_seconds = 0
-
-
-        now = int(time.time())
-        dns_res = requests.get(
-            "http://192.168.1.105/admin/api.php?getAllQueries&from={fromseconds}&until={until}"
-                .format(fromseconds=last_sync_seconds, until=(now - 1))
-        )
-
-        dns_queries = dns_res.json()
-        sesh = app.db.session
-        for q in dns_queries.get("data"):
-            query = parse_phole_query(q)
-            sesh.add(query.to_model())
-
-        sesh.commit()
-
-        # overwrite the file contents
-        f.seek(0)
-        f.write(str(now))
-        f.truncate()
+    try:
+        last_sync_seconds = int(val)
+    except (ValueError, TypeError):
+        last_sync_seconds = 0
 
 
+    now = int(time.time())
+    dns_res = requests.get(
+        "http://192.168.1.105/admin/api.php?getAllQueries&from={fromseconds}&until={until}"
+            .format(fromseconds=last_sync_seconds, until=(now - 1))
+    )
+
+    dns_queries = dns_res.json()
+    sesh = db.session
+    for q in dns_queries.get("data"):
+        query = parse_phole_query(q)
+        sesh.add(query.to_model())
+
+    sesh.commit()
 
 
-
-# @huey.periodic_task(crontab(month="*", day="*", hour="*", minute="*", day_of_week="*"))
+@huey.periodic_task(crontab(month="*", day="*", hour="*", minute="*", day_of_week="*"))
 def get_active_hosts():
     """
     Run NMAP to gather the active hosts on our network
@@ -131,7 +128,7 @@ def get_active_hosts():
 
     output = parse_nmap_output(nmap_output)
 
-    sesh = app.db.session
+    sesh = get_db().session
     for key in output.keys():
         val = output.get(key)
         log = Log()
@@ -156,15 +153,3 @@ def get_active_hosts():
             sesh.add(log)
 
     sesh.commit()
-
-
-# @huey.periodic_task(crontab(month="*", day="*", hour="*", minute="*", day_of_week="*"))
-# def get_dns_lookups():
-# """
-# Grab the last entries from pihole to see what we've been seeing
-# """
-
-if __name__ == "__main__":
-    print("Running as standalone app")
-    # get_active_hosts()
-    get_dns_queries()

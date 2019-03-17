@@ -2,12 +2,30 @@ from . import app
 from flask import request, jsonify
 from datetime import datetime
 from models import util, module_config
+from models.log import Log
 import requests
 from requests import ConnectionError
 import json
 
 from models.sensor_manipulator_module import SensorManipulatorModule
 from models.module_config import ModuleConfig
+
+@app.route("/occupancy", methods=["POST"])
+def post_occupancy_status():
+    data = request.get_json()
+    status = data.get("status")
+
+    status = "occupied" if status == "occupied" else "unoccupied"
+
+    log = Log()
+    log.type = "occupancy-status"
+    log.value = status # occupied / unoccupied
+
+    app.db.session.add(log)
+    app.db.session.commit()
+
+    return "Welcome home" if status == "occupied" else "Goodbye"
+
 
 @app.route("/keep-alive", methods=["POST"])
 def post_keep_alive():
@@ -180,6 +198,8 @@ def push_config(module, config):
         }))
     except ConnectionError as e:
         print(e)
+
+
 
 
 
