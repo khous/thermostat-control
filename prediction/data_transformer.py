@@ -132,9 +132,13 @@ def main(from_time, to_time):
 
 if __name__ == "__main__":
     first_log = AggregateLog.query.order_by(AggregateLog.to_time.desc()).first()
-    from_time = first_log.to_time
 
-    while True:
+    if first_log:
+        from_time = first_log.to_time
+    else:
+        from_time = Log.query.order_by(Log.ts.asc()).first().ts
+
+    while from_time + timedelta(seconds=900) < datetime.utcnow():
         to_time = from_time + timedelta(seconds=900)
         main(from_time, to_time)
         print("We're at " + str(from_time))
