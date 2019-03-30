@@ -153,3 +153,72 @@ def get_active_hosts():
             sesh.add(log)
 
     sesh.commit()
+
+
+"""
+{
+    "results": [
+        {
+            "module": {
+                "config_id": 1,
+                "id": 2,
+                "ipv4_address": "192.168.1.106",
+                "last_keep_alive_ping": "Sat, 30 Mar 2019 20:38:30 GMT",
+                "mac_address": "30:AE:A4:27:F7:08",
+                "name": "office"
+            },
+            "reading": {
+                "co2": 488,
+                "currentTemp": 68.9,
+                "hum": 37,
+                "off_degrees": 20,
+                "on": false,
+                "on_degrees": 70,
+                "setTemp": 50
+            },
+            "status_code": 200
+        }
+    ]
+}"""
+
+@huey.periodic_task(crontab(month="*", day="*", hour="*", minute="*", day_of_week="*"))
+def get_atmospherics():
+    # make request to office
+    # log req
+    response = requests.get("http://192.168.1.105:1337/module/office/read")
+    data = response.json()
+
+    if not data.get("results"):
+        return
+
+    office_reading = data["results"][0]["reading"]
+
+    co2_log = Log()
+
+    co2_log.type = "office-co2"
+    co2_log.value = office_reading["co2"]
+
+    sesh = get_db().session
+
+    sesh.add(co2_log)
+
+    temp_log = Log()
+
+    temp_log.type = "office-temperature"
+    temp_log.value = office_reading["currentTemp"]
+
+    sesh.add(temp_log)
+
+    sesh.commit()
+
+
+
+
+
+
+
+
+
+
+
+

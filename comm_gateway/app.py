@@ -27,6 +27,23 @@ def post_occupancy_status():
     return "Welcome home" if status == "occupied" else "Goodbye"
 
 
+@app.route("/office", methods=["POST"])
+def post_office_occupancy_status():
+    data = request.get_json()
+    status = data.get("status")
+
+    status = "occupied" if status == "occupied" else "unoccupied"
+
+    log = Log()
+    log.type = "office-occupancy-status"
+    log.value = status # occupied / unoccupied
+
+    app.db.session.add(log)
+    app.db.session.commit()
+
+    return "Get to work" if status == "occupied" else "Get a beer"
+
+
 @app.route("/keep-alive", methods=["POST"])
 def post_keep_alive():
     data = request.get_json()
