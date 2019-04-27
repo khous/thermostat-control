@@ -15,6 +15,7 @@ peewee = "*"
 numpy = "*"
 pandas = "*"
 sklearn = "*"
+pyserial = "*"
 
 [requires]
 python_version = "3.7"
